@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador MOP | Región del Maule</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Babel para transpilar JSX en el navegador -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        slate: { 850: '#1e293b', 900: '#0f172a', 950: '#020617' },
+                        primary: { 50: '#eef2ff', 100: '#e0e7ff', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 900: '#312e81' },
+                        brand: { DEFAULT: '#00306b' }
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+                        'glow': '0 0 15px rgba(99, 102, 241, 0.3)',
+                    },
+                    animation: {
+                        'blob': 'blob 7s infinite',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- IMPORT MAP: Configurado para usar Recharts sin errores -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom": "https://esm.sh/react-dom@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
+            "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0,react-dom@18.2.0"
+        }
+    }
+    </script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+        
+        .shimmer {
+            background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+        /* Loader inicial visible */
+        #root:empty::before {
+            content: 'Iniciando sistema MOP...';
+            display: flex;
+            height: 100vh;
+            width: 100%;
+            justify-content: center;
+            align-items: center;
+            color: #64748b;
+            font-family: sans-serif;
+            font-size: 1.2rem;
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    </style>
+</head>
+<body class="text-slate-800 antialiased h-screen overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
+    
+    <div id="root"></div>
+
+    <script>
+        window.addEventListener('error', function(e) {
+            const root = document.getElementById('root');
+            if (root && root.innerHTML === '') {
+                console.error("Error global detectado:", e);
+                root.innerHTML = `<div style="display:flex; height:100vh; align-items:center; justify-content:center; text-align:center; padding:20px; color:#ef4444; font-family:sans-serif;">
+                    <div>
+                        <h3 style="font-weight:bold; font-size:1.2rem; margin-bottom:10px;">Error de Inicialización</h3>
+                        <p>No se pudo cargar la aplicación. Detalles en consola.</p>
+                        <p style="font-size:0.8rem; margin-top:10px; color:#64748b;">${e.message}</p>
+                    </div>
+                </div>`;
+            }
+        });
+    </script>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart as RePieChart, Pie, Legend } from 'recharts';
+        import { 
+            LayoutDashboard, Database, Filter, Calendar, ChevronDown, Check, Search, Building2, Wallet, TrendingUp, Menu, X, ChevronRight, ChevronLeft, Wifi, ExternalLink, MoreHorizontal, ArrowUpRight, Layers, ArrowRight, ArrowLeft, MapPin, Briefcase, FileText, AlertCircle
+        } from 'lucide-react';
+
+        // ==========================================
+        // CONFIGURACIÓN API
+        // ==========================================
+        const API_BASE_URL = "https://default6780ef6e6e8c4ac2b2bc18eb02f617.a6.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/a0ffedb8a7934d86820cde9393c3c1d0/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=0B02dK7A5QTY7lVc8zZgg8BJnfYZQK9uAGMSgqvFsLc";
+        
+        const COLORS = ['#4f46e5', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#14b8a6'];
+        
+        // Formateador de moneda: Ahora muestra en Millones de Pesos (MM$)
+        const formatMoney = (v) => {
+            if (!v) return 'MM$ 0';
+            // Como los datos base están en miles de pesos, dividimos por 1000 para llegar a millones
+            const millones = v / 1000; 
+            return `MM$ ${new Intl.NumberFormat('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(millones)}`;
+        };
+
+        // Parseador robusto para convertir formatos de Excel (texto, puntos, comas) a números matemáticos
+        const parseMoney = (val) => {
+            if (val === null || val === undefined || val === '') return 0;
+            if (typeof val === 'number') return val;
+            let str = String(val).trim();
+            str = str.replace(/[\$\s]/g, ''); // Quitar signos $ y espacios
+            
+            const dotCount = (str.match(/\./g) || []).length;
+            const commaCount = (str.match(/,/g) || []).length;
+            
+            if (commaCount === 1 && dotCount > 0) {
+                // Formato chileno: 1.000.000,50
+                str = str.replace(/\./g, '').replace(',', '.');
+            } else if (dotCount === 1 && commaCount > 0) {
+                // Formato US: 1,000,000.50
+                str = str.replace(/,/g, '');
+            } else if (dotCount > 1) {
+                // Ejemplo: 1.000.000 -> son separadores de miles
+                str = str.replace(/\./g, '');
+            } else if (commaCount > 1) {
+                // Ejemplo: 1,000,000 -> son separadores de miles
+                str = str.replace(/,/g, '');
+            } else if (commaCount === 1 && dotCount === 0) {
+                // Ejemplo: 1000,50 -> la coma es decimal en Chile
+                str = str.replace(',', '.');
+            }
+            // Si dotCount === 1 && commaCount === 0 (Ej: "67258.013")
+            // Se trata como un float normal ya que Power Automate envía los decimales con punto.
+            
+            return parseFloat(str) || 0;
+        };
+
+        // ==========================================
+        // COMPONENTES UI
+        // ==========================================
+        const SkeletonCard = () => (
+            <div className="bg-white rounded-2xl p-6 shadow-soft border border-slate-100">
+                <div className="flex justify-between items-start">
+                    <div className="w-full">
+                        <div className="h-3 w-24 bg-slate-100 rounded mb-3 shimmer"></div>
+                        <div className="h-8 w-32 bg-slate-100 rounded mb-2 shimmer"></div>
+                        <div className="h-3 w-20 bg-slate-100 rounded shimmer"></div>
+                    </div>
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 shimmer"></div>
+                </div>
+            </div>
+        );
+
+        const SkeletonTable = () => (
+            <div className="bg-white rounded-2xl shadow-soft border border-slate-100 overflow-hidden">
+                <div className="p-5 border-b border-slate-100 bg-slate-50/50">
+                    <div className="h-5 w-48 bg-slate-200 rounded shimmer"></div>
+                </div>
+                <div className="p-6 space-y-4">
+                    {[1,2,3,4,5].map(i => (
+                        <div key={i} className="flex gap-4">
+                            <div className="h-4 w-1/4 bg-slate-100 rounded shimmer"></div>
+                            <div className="h-4 w-1/4 bg-slate-100 rounded shimmer"></div>
+                            <div className="h-4 w-1/6 bg-slate-100 rounded shimmer"></div>
+                            <div className="h-4 w-1/6 bg-slate-100 rounded shimmer"></div>
+                            <div className="h-4 w-1/6 bg-slate-100 rounded shimmer"></div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const KPICard = ({ title, value, subtext, icon: Icon, colorClass, bgClass, delay = 0 }) => (
+            <div className="bg-white rounded-2xl p-4 shadow-soft border border-slate-100 hover:border-indigo-100 hover:shadow-lg hover:shadow-indigo-500/5 transition-all duration-300 group relative overflow-hidden animate-fade-in" style={{ animationDelay: `${delay}ms` }}>
+                <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-500 ${bgClass.replace('bg-', 'bg-')}`}></div>
+                <div className="flex justify-between items-start relative z-10">
+                    <div>
+                        <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-2">{title}</p>
+                        <h3 className="text-2xl font-bold text-slate-800 tracking-tight group-hover:text-indigo-700 transition-colors">{value}</h3>
+                        {subtext && (<p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1 font-medium">{subtext}</p>)}
+                    </div>
+                    <div className={`p-3 rounded-2xl ${bgClass} group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 shadow-inner`}>
+                        <Icon size={20} className={colorClass} strokeWidth={2.5} />
+                    </div>
+                </div>
+            </div>
+        );
+
+        const MultiSelect = ({ options, selected, onChange, label, icon: Icon }) => {
+            const [isOpen, setIsOpen] = useState(false);
+            const containerRef = useRef(null);
+            
+            useEffect(() => {
+                const handleClickOutside = (e) => { if (containerRef.current && !containerRef.current.contains(e.target)) setIsOpen(false); };
+                document.addEventListener('mousedown', handleClickOutside);
+                return () => document.removeEventListener('mousedown', handleClickOutside);
+            }, []);
+            
+            const isAllSelected = selected.length === options.length && options.length > 0;
+            const toggleOption = (opt) => selected.includes(opt) ? onChange(selected.filter(i => i !== opt)) : onChange([...selected, opt]);
+            
+            const getSummary = () => {
+                if (selected.length === 0 || (isAllSelected && options.length > 0)) return `Todos`;
+                if (selected.length === 1) return selected[0];
+                return `${selected.length} seleccionados`;
+            };
+            
+            return (
+                <div className="relative group" ref={containerRef}>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">{label}</label>
+                    <button onClick={() => setIsOpen(!isOpen)} className={`w-full bg-slate-800/50 border ${isOpen ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-700 group-hover:border-slate-600'} rounded-xl py-3 px-4 text-sm flex justify-between items-center transition-all text-slate-200 backdrop-blur-sm`}>
+                        <div className="flex items-center gap-2.5 overflow-hidden">{Icon && <Icon size={16} className={`${isOpen ? 'text-indigo-400' : 'text-slate-400'} flex-shrink-0 transition-colors`} />}<span className="truncate font-medium">{getSummary()}</span></div>
+                        <ChevronDown size={16} className={`text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180 text-indigo-400' : ''}`} />
+                    </button>
+                    {isOpen && (
+                        <div className="absolute z-50 mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-xl shadow-slate-900/10 max-h-64 overflow-y-auto custom-scrollbar animate-fade-in">
+                            <div className="sticky top-0 bg-slate-50/95 backdrop-blur-md border-b border-slate-100 p-2 cursor-pointer hover:bg-slate-100 transition-colors z-10" onClick={() => isAllSelected ? onChange([]) : onChange([...options])}>
+                                <div className="flex items-center gap-3 px-2 py-1"><div className={`w-4 h-4 rounded border flex items-center justify-center transition-all duration-200 ${isAllSelected ? 'bg-indigo-600 border-indigo-600 shadow-sm' : 'bg-white border-slate-300'}`}>{isAllSelected && <Check size={12} className="text-white" strokeWidth={3} />}</div><span className="text-sm font-bold text-indigo-900">Seleccionar Todo</span></div>
+                            </div>
+                            <div className="p-1.5">{options.map(opt => (<div key={opt} className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => toggleOption(opt)}><div className={`w-4 h-4 rounded border flex items-center justify-center transition-all duration-200 ${selected.includes(opt) ? 'bg-indigo-500 border-indigo-500 shadow-sm' : 'bg-white border-slate-300'}`}>{selected.includes(opt) && <Check size={10} className="text-white" strokeWidth={3} />}</div><span className={`text-sm ${selected.includes(opt) ? 'text-indigo-900 font-medium' : 'text-slate-600'}`}>{opt}</span></div>))}</div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- COMPONENTE: PORTADA ---
+        const LandingPage = ({ onEnter }) => {
+            return (
+                <div className="h-screen w-full bg-brand relative overflow-hidden flex flex-col items-center justify-center text-white font-sans">
+                    <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
+                        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-blob"></div>
+                        <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-blob animation-delay-2000"></div>
+                        <div className="absolute -bottom-32 left-1/2 w-96 h-96 bg-blue-600 rounded-full mix-blend-multiply filter blur-[128px] opacity-20 animate-blob animation-delay-4000"></div>
+                        <div className="absolute inset-0 bg-slate-900/20"></div>
+                    </div>
+
+                    <div className="relative z-10 text-center px-4 max-w-4xl mx-auto">
+                        <div className="mb-8 inline-flex p-6 bg-white rounded-3xl shadow-2xl shadow-indigo-500/20 animate-fade-in">
+                            <img src="https://cchc.cl/documents/431409/0/logoCChC.png/002fea99-2039-beec-02a7-a92335532d6f?t=1695346405910" alt="CChC Maule" className="h-16 w-auto object-contain" />
+                        </div>
+
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6 text-white animate-fade-in leading-tight" style={{animationDelay: '100ms'}}>
+                            Visualizador de proyectos MOP <br className="hidden md:block"/> a licitar en el Maule
+                        </h1>
+                        
+                        <p className="text-lg md:text-xl text-indigo-100 font-light tracking-wide mb-12 animate-fade-in max-w-2xl mx-auto leading-relaxed" style={{animationDelay: '200ms'}}>
+                            Análisis de Contratos de obras, estudios y asesorías por licitar en la Región del Maule.
+                        </p>
+
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-fade-in w-full px-4" style={{animationDelay: '300ms'}}>
+                            <button onClick={onEnter} className="w-full sm:w-auto group relative px-8 py-4 bg-white text-indigo-950 font-bold rounded-xl shadow-xl shadow-indigo-500/20 hover:shadow-indigo-500/40 hover:scale-[1.02] transition-all duration-300 flex items-center justify-center gap-3 overflow-hidden">
+                                <span className="relative z-10">ENTRAR AL VISUALIZADOR</span>
+                                <ArrowRight className="relative z-10 w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                                <div className="absolute inset-0 bg-gradient-to-r from-indigo-50 to-white opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                            </button>
+                            
+                            <a href="https://cchc.cl" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto justify-center px-6 py-4 text-indigo-300 hover:text-white text-sm font-medium transition-colors flex items-center gap-2">
+                                <ExternalLink size={16} />
+                                <span>Sitio Web CChC</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div className="absolute bottom-8 left-0 w-full text-center text-[10px] text-white font-mono z-10 uppercase tracking-widest opacity-50">Cámara Chilena de la Construcción • Sede Maule</div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // COMPONENTE: DASHBOARD
+        // ==========================================
+        const Dashboard = ({ onBack }) => {
+            const [data, setData] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [errorMsg, setErrorMsg] = useState('');
+            const [isLive, setIsLive] = useState(false);
+            const [sidebarOpen, setSidebarOpen] = useState(false);
+            const [loadProgress, setLoadProgress] = useState('');
+            
+            // Filtros
+            const [selectedTipos, setSelectedTipos] = useState([]);
+            const [selectedEstados, setSelectedEstados] = useState([]);
+            const [selectedServicios, setSelectedServicios] = useState([]);
+            const [selectedTrimestres, setSelectedTrimestres] = useState([]);
+            const [selectedCentros, setSelectedCentros] = useState([]);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [periodoActual, setPeriodoActual] = useState('');
+            
+            // Estado para el filtro cruzado de la tabla
+            const [selectedProject, setSelectedProject] = useState(null);
+
+            // Paginación UI
+            const [currentPage, setCurrentPage] = useState(1);
+            const itemsPerPage = 8; 
+
+            // =======================================================
+            // LÓGICA DE EXTRACCIÓN Y PAGINACIÓN DE LA API (POWER AUTOMATE)
+            // =======================================================
+            useEffect(() => {
+                const fetchAllData = async () => {
+                    setLoading(true);
+                    setErrorMsg('');
+                    setLoadProgress('Conectando a base de datos MOP...');
+                    
+                    let allRecords = [];
+                    let offset = 0;
+                    let hasMoreData = true;
+
+                    // Función auxiliar para buscar el valor real del diccionario 
+                    // (Considerando sufijos _x002e_1 por problemas de Excel)
+                    const getVal = (obj, keys) => {
+                        for(let k of keys) {
+                            if(obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+                        }
+                        return null;
+                    };
+
+                    // Función de parseo de fechas movida aquí arriba para usarla en la limpieza fila a fila
+                    const parseDateToTimestamp = (str) => {
+                        if (!str || str === "Sin Fecha" || str === "Por Definir") return 0;
+                        
+                        // 1. Formato Número de Serie de Excel
+                        if (!isNaN(str) && Number(str) > 20000) return Math.round((Number(str) - 25569) * 86400000);
+                        
+                        let cleanStr = String(str).toLowerCase().trim();
+                        
+                        // 2. Formato DD-MM-YYYY o DD/MM/YYYY
+                        const dateMatch = cleanStr.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+                        if (dateMatch) return Date.UTC(parseInt(dateMatch[3]), parseInt(dateMatch[2]) - 1, parseInt(dateMatch[1]));
+
+                        // 3. Formato YYYY-MM-DD o YYYY/MM/DD
+                        const dateMatchRev = cleanStr.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+                        if (dateMatchRev) return Date.UTC(parseInt(dateMatchRev[1]), parseInt(dateMatchRev[2]) - 1, parseInt(dateMatchRev[3]));
+
+                        // 4. Formato Texto (ej: "enero 2026")
+                        const months = {'ene': 0, 'feb': 1, 'mar': 2, 'abr': 3, 'may': 4, 'jun': 5, 'jul': 6, 'ago': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dic': 11};
+                        let monthFound = -1;
+                        let yearFound = new Date().getFullYear();
+                        
+                        for (const [m, val] of Object.entries(months)) {
+                            if (cleanStr.includes(m)) { monthFound = val; break; }
+                        }
+                        const yearMatch = cleanStr.match(/\d{4}/);
+                        if (yearMatch) yearFound = parseInt(yearMatch[0]);
+                        
+                        if (monthFound !== -1) return Date.UTC(yearFound, monthFound, 1);
+                        
+                        // 5. Fallback estándar de Javascript
+                        const d = new Date(str);
+                        if (!isNaN(d.getTime())) return d.getTime();
+                        return 0;
+                    };
+
+                    try {
+                        while (hasMoreData) {
+                            setLoadProgress(`Descargando registros... (${allRecords.length} obtenidos)`);
+                            
+                            const response = await fetch(`${API_BASE_URL}&saltar=${offset}`, {
+                                method: 'GET',
+                                headers: { 'Accept': 'application/json' }
+                            });
+
+                            if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
+                            
+                            // Se lee la respuesta como texto primero para manejar respuestas vacías o no-JSON
+                            const textData = await response.text();
+                            
+                            if (!textData || textData.trim() === '') {
+                                // Power Automate puede devolver una cadena vacía cuando ya no hay más datos
+                                hasMoreData = false;
+                                break;
+                            }
+
+                            let json;
+                            try {
+                                json = JSON.parse(textData);
+                            } catch (parseError) {
+                                console.warn("JSON inválido recibido, asumiendo fin de datos.", parseError);
+                                hasMoreData = false;
+                                break;
+                            }
+
+                            // Extraer items considerando diferentes estructuras posibles que devuelve Power Automate
+                            let items = [];
+                            if (Array.isArray(json)) {
+                                items = json;
+                            } else if (json && Array.isArray(json.value)) {
+                                items = json.value;
+                            } else if (json && Array.isArray(json.body)) {
+                                items = json.body;
+                            } else if (json && typeof json === 'object') {
+                                const possibleArray = Object.values(json).find(val => Array.isArray(val));
+                                if (possibleArray) items = possibleArray;
+                            }
+                            
+                            if (items.length === 0) {
+                                hasMoreData = false; // Fin de la paginación
+                            } else {
+                                // Procesar el bloque de datos actual
+                                const processedBlock = items.map((d, index) => {
+                                    
+                                    // 1. Nombre
+                                    const nombre = getVal(d, ["Nombre Contrato", "Nombre Contrato_x002e_1", "Nombre IDI"]) || `Sin Nombre (ID: ${d.ItemInternalId || index})`;
+                                    
+                                    // 2. Clasificación/Tipo
+                                    const tipoRaw = getVal(d, ["Item", "Clasificacion", "Etapa", "Tipo Contratación"]);
+                                    let tipo = "Otro";
+                                    if(tipoRaw) {
+                                        const str = String(tipoRaw).toUpperCase();
+                                        if(str.includes('OBRA') || str.includes('PROYECTO')) tipo = 'Obra';
+                                        else if(str.includes('ESTUDIO') || str.includes('DISEÑO')) tipo = 'Estudio';
+                                        else if(str.includes('ASESORIA') || str.includes('CONSULTORIA')) tipo = 'Asesoría';
+                                        else tipo = String(tipoRaw);
+                                    }
+
+                                    // 3. Ubicación
+                                    const provincia = getVal(d, ["Provincia", "Provincia Contrato"]) || "Regional";
+                                    const comuna = getVal(d, ["Comuna", "Comuna Contrato"]) || "Varias";
+                                    
+                                    // 4. Servicio / Dirección
+                                    const servicio = getVal(d, ["Servicio", "Servicio_x002e_1"]) || "MOP Nivel Central";
+                                    
+                                    // 5. Estado (Se mantiene para filtros aunque no se muestre en tabla)
+                                    const estado = getVal(d, ["Estado", "Estado_x002e_1"]) || "No Definido";
+                                    
+                                    // Extraer Trimestre y Mes Entrega DIRPLAN primero para la regla de negocio
+                                    const trimestreMovil = getVal(d, ["trimestre movil", "trimestre movil_x002e_1", "mes", "mes_x002e_1"]) || "Sin Trimestre";
+                                    const mesEntrega = getVal(d, ["mes entrega DIRPLAN", "mes entrega DIRPLAN_x002e_1"]) || "Sin Fecha";
+                                    const mesEntregaTs = parseDateToTimestamp(mesEntrega);
+
+                                    // 6. Fechas (Convertir y aplicar REGLA DE NEGOCIO DIRPLAN)
+                                    let fechaRaw = getVal(d, ["Mes Licitación", "Mes Licitación_x002e_1", "F Licitación", "F Licitación_x002e_1"]);
+                                    let fechaLicitacion = "Por Definir";
+                                    let fechaLicitacionTs = 0;
+
+                                    if(fechaRaw) {
+                                        fechaLicitacionTs = parseDateToTimestamp(fechaRaw);
+                                        if (fechaLicitacionTs > 0) {
+                                            const excelDate = new Date(fechaLicitacionTs);
+                                            fechaLicitacion = excelDate.toLocaleDateString('es-CL', { timeZone: 'UTC', month: 'short', year: 'numeric' });
+                                        } else {
+                                            fechaLicitacion = String(fechaRaw);
+                                        }
+                                    }
+
+                                    // REGLA: Si la fecha de Licitación es estrictamente menor a la fecha DIRPLAN, se oculta.
+                                    if (fechaLicitacionTs > 0 && mesEntregaTs > 0 && fechaLicitacionTs < mesEntregaTs) {
+                                        fechaLicitacion = "Por Definir";
+                                    }
+
+                                    // 6.1 Fechas de Inicio y Término
+                                    let fInicioRaw = getVal(d, ["F Inicio", "F Inicio_x002e_1"]);
+                                    let fInicio = "-";
+                                    if(fInicioRaw) {
+                                        let ts = parseDateToTimestamp(fInicioRaw);
+                                        if(ts > 0) fInicio = new Date(ts).toLocaleDateString('es-CL', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+                                        else fInicio = String(fInicioRaw);
+                                    }
+
+                                    let fTerminoRaw = getVal(d, ["F Término", "F Término_x002e_1"]);
+                                    let fTermino = "-";
+                                    if(fTerminoRaw) {
+                                        let ts = parseDateToTimestamp(fTerminoRaw);
+                                        if(ts > 0) fTermino = new Date(ts).toLocaleDateString('es-CL', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' });
+                                        else fTermino = String(fTerminoRaw);
+                                    }
+
+                                    // 7. Finanzas (Prioridad estricta: Programado año -> Programado + pagado año -> 0)
+                                    let presupuesto = 0;
+                                    const pAno = getVal(d, ["Programado año", "Programado año_x002e_1"]);
+                                    const pPagado = getVal(d, ["Programado + pagado año", "Programado + pagado año_x002e_1"]);
+                                    
+                                    if (pAno !== null && pAno !== undefined && String(pAno).trim() !== "") {
+                                        presupuesto = parseMoney(pAno);
+                                    } else if (pPagado !== null && pPagado !== undefined && String(pPagado).trim() !== "") {
+                                        presupuesto = parseMoney(pPagado);
+                                    }
+
+                                    // 7.1 Monto Vigente Contrato
+                                    let montoVigente = 0;
+                                    const mVigente = getVal(d, ["Monto Vigente Contrato", "Monto Vigente Contrato_x002e_1"]);
+                                    if (mVigente !== null && mVigente !== undefined && String(mVigente).trim() !== "") {
+                                        montoVigente = parseMoney(mVigente);
+                                    }
+
+                                    // 9. Centro Gestión
+                                    const centroGestion = getVal(d, ["Centro Gestión", "Centro gestión_x002e_1", "Centro gestión.1"]) || "Sin Centro";
+
+                                    return { 
+                                        id: d.ItemInternalId || (offset + index), 
+                                        nombre, tipo, provincia, comuna, estado, servicio, presupuesto, montoVigente, fechaLicitacion, fInicio, fTermino, trimestreMovil, mesEntrega, centroGestion
+                                    };
+                                });
+
+                                allRecords = allRecords.concat(processedBlock);
+                                offset += 5000;
+                                
+                                // Si trajo menos de 5000, es la última página
+                                if (items.length < 5000) hasMoreData = false;
+                            }
+                        }
+
+                        if (allRecords.length > 0) {
+                            let maxTimestamp = -1;
+                            let latestMesEntrega = null;
+                            
+                            allRecords.forEach(r => {
+                                const ts = parseDateToTimestamp(r.mesEntrega);
+                                if (ts > maxTimestamp) {
+                                    maxTimestamp = ts;
+                                    latestMesEntrega = r.mesEntrega;
+                                }
+                            });
+
+                            // Filtrar globalmente por el último periodo
+                            const finalRecords = latestMesEntrega && latestMesEntrega !== "Sin Fecha" 
+                                ? allRecords.filter(r => r.mesEntrega === latestMesEntrega) 
+                                : allRecords;
+
+                            // Formatear periodo para mostrar en la interfaz limpiamente (Ej: "enero de 2026")
+                            let periodoDisplay = latestMesEntrega || "Actualizado";
+                            if (latestMesEntrega && latestMesEntrega !== "Sin Fecha") {
+                                const ts = parseDateToTimestamp(latestMesEntrega);
+                                if (ts > 0) {
+                                    periodoDisplay = new Date(ts).toLocaleDateString('es-CL', { timeZone: 'UTC', month: 'long', year: 'numeric' });
+                                }
+                            }
+
+                            setData(finalRecords);
+                            setPeriodoActual(periodoDisplay);
+                            setIsLive(true);
+                        } else {
+                            setData([]);
+                            setIsLive(true);
+                            setErrorMsg("La conexión fue exitosa, pero la base de datos no retornó ningún registro.");
+                        }
+
+                    } catch (err) {
+                        console.error("Error en extracción:", err);
+                        setErrorMsg(err.message);
+                        setIsLive(false);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                fetchAllData();
+            }, []);
+
+            // Resetear página y selección de tabla al aplicar filtros laterales
+            useEffect(() => { 
+                setCurrentPage(1); 
+                setSelectedProject(null);
+            }, [selectedTipos, selectedEstados, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
+
+            // Función de filtrado multidimensional
+            const getFilteredData = (ignoreFilter) => {
+                return data.filter(d => {
+                    if (ignoreFilter !== 'tipo' && selectedTipos.length > 0 && !selectedTipos.includes(d.tipo)) return false;
+                    if (ignoreFilter !== 'estado' && selectedEstados.length > 0 && !selectedEstados.includes(d.estado)) return false;
+                    if (ignoreFilter !== 'servicio' && selectedServicios.length > 0 && !selectedServicios.includes(d.servicio)) return false;
+                    if (ignoreFilter !== 'trimestre' && selectedTrimestres.length > 0 && !selectedTrimestres.includes(d.trimestreMovil)) return false;
+                    if (ignoreFilter !== 'centro' && selectedCentros.length > 0 && !selectedCentros.includes(d.centroGestion)) return false;
+                    
+                    if (searchTerm) {
+                        const s = searchTerm.toLowerCase();
+                        if (!d.nombre.toLowerCase().includes(s) && !d.comuna.toLowerCase().includes(s) && !d.servicio.toLowerCase().includes(s)) return false;
+                    }
+                    return true;
+                });
+            };
+
+            // Opciones dinámicas para los filtros (se actualizan según lo que está filtrado)
+            const tipos = useMemo(() => { const sub = getFilteredData('tipo'); return [...new Set(sub.map(d => d.tipo))].sort(); }, [data, selectedEstados, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
+            const estados = useMemo(() => { const sub = getFilteredData('estado'); return [...new Set(sub.map(d => d.estado))].sort(); }, [data, selectedTipos, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
+            const servicios = useMemo(() => { const sub = getFilteredData('servicio'); return [...new Set(sub.map(d => d.servicio))].sort(); }, [data, selectedTipos, selectedEstados, selectedTrimestres, selectedCentros, searchTerm]);
+            const trimestres = useMemo(() => { const sub = getFilteredData('trimestre'); return [...new Set(sub.map(d => d.trimestreMovil))].sort(); }, [data, selectedTipos, selectedEstados, selectedServicios, selectedCentros, searchTerm]);
+            const centros = useMemo(() => { const sub = getFilteredData('centro'); return [...new Set(sub.map(d => d.centroGestion))].sort(); }, [data, selectedTipos, selectedEstados, selectedServicios, selectedTrimestres, searchTerm]);
+            
+            // Datos filtrados finales para la tabla y gráficos
+            const filtered = useMemo(() => getFilteredData('none'), [data, selectedTipos, selectedEstados, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
+
+            // Datos activos para KPIs y Gráficos (Cross-Filter de la tabla)
+            const activeData = useMemo(() => {
+                if (selectedProject) return filtered.filter(d => d.id === selectedProject);
+                return filtered;
+            }, [filtered, selectedProject]);
+
+            // Paginación calculada (Usa filtered para que la tabla no se reduzca a 1 fila)
+            const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
+            const paginatedData = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+            // KPIs (Ahora se alimentan de activeData para el Cross-Filtering)
+            const kpiPresupuesto = activeData.reduce((acc, curr) => acc + curr.presupuesto, 0);
+            const kpiMontoVigente = activeData.reduce((acc, curr) => acc + curr.montoVigente, 0);
+            const countObras = activeData.filter(d => d.tipo === 'Obra' || d.tipo.toLowerCase().includes('obra')).length;
+
+            // Datos para Gráficos (También se alimenta de activeData)
+            const chartDataServicio = useMemo(() => { 
+                const m = {};
+                activeData.forEach(d => m[d.servicio] = (m[d.servicio] || 0) + d.presupuesto); 
+                return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5); 
+            }, [activeData]);
+
+            // Handlers UI
+            const handlePrevPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
+            const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
+
+            return (
+                <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+                    {/* Overlay Mobile */}
+                    {sidebarOpen && (<div className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm md:hidden transition-opacity animate-fade-in" onClick={() => setSidebarOpen(false)} />)}
+                    
+                    {/* Sidebar */}
+                    <aside className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-brand text-white flex flex-col shadow-2xl transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+                        <div className="p-6 flex items-center justify-between border-b border-slate-800/50 bg-slate-900/30">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-white p-1.5 rounded-xl shadow-lg shadow-indigo-500/30 ring-1 ring-white/10 h-10 w-10 flex items-center justify-center overflow-hidden">
+                                    <img src="https://cchc.cl/documents/431409/0/logoCChC.png/002fea99-2039-beec-02a7-a92335532d6f?t=1695346405910" alt="CChC Logo" className="w-full h-full object-contain" />
+                                </div>
+                                <div>
+                                    <h1 className="font-bold text-lg leading-none tracking-tight">CChC Maule</h1>
+                                    <p className="text-[10px] text-indigo-300 font-medium tracking-widest mt-1 uppercase">Proyectos MOP</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-white transition-colors"><X size={24} /></button>
+                        </div>
+                        
+                        <nav className="flex-1 p-5 space-y-6 overflow-y-auto custom-scrollbar">
+                            <div className="space-y-2">
+                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-2 mb-2">Menú Principal</div>
+                                <button onClick={onBack} className="w-full flex items-center gap-3 px-4 py-3 text-indigo-200 hover:bg-white/5 rounded-xl transition-all group mb-2">
+                                    <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" /> <span className="font-medium">Volver a Portada</span>
+                                </button>
+                            </div>
+                            
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between px-2 mb-2">
+                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Filtros Activos</span>
+                                    {(selectedTipos.length > 0 || selectedEstados.length > 0 || selectedServicios.length > 0 || selectedTrimestres.length > 0 || selectedCentros.length > 0) && (
+                                        <button onClick={() => { setSelectedTipos([]); setSelectedEstados([]); setSelectedServicios([]); setSelectedTrimestres([]); setSelectedCentros([]); }} className="text-[10px] text-indigo-400 hover:text-indigo-300 hover:underline">Limpiar</button>
+                                    )}
+                                </div>
+                                <div className="space-y-4">
+                                    <MultiSelect label="Trimestre Móvil" options={trimestres} selected={selectedTrimestres} onChange={setSelectedTrimestres} icon={Calendar} />
+                                    <MultiSelect label="Centro Gestión" options={centros} selected={selectedCentros} onChange={setSelectedCentros} icon={MapPin} />
+                                    <MultiSelect label="Servicio MOP" options={servicios} selected={selectedServicios} onChange={setSelectedServicios} icon={Layers} />
+                                    <MultiSelect label="Tipo de Contrato" options={tipos} selected={selectedTipos} onChange={setSelectedTipos} icon={Briefcase} />
+                                    <MultiSelect label="Estado Licitación" options={estados} selected={selectedEstados} onChange={setSelectedEstados} icon={Check} />
+                                </div>
+                            </div>
+                        </nav>
+                    </aside>
+
+                    {/* Main Content */}
+                    <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-50/50">
+                        {/* Header */}
+                        <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 flex flex-col md:flex-row items-start md:items-center justify-between px-4 md:px-6 py-3 md:py-4 z-20 sticky top-0 gap-3 md:gap-0">
+                            <div className="w-full md:w-auto flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <button onClick={() => setSidebarOpen(true)} className="p-2 -ml-2 rounded-xl hover:bg-slate-100 text-slate-600 md:hidden transition-colors"><Menu size={24} /></button>
+                                    <div>
+                                        <h2 className="font-bold text-slate-800 text-lg md:text-xl tracking-tight">Cartera MOP</h2>
+                                        <p className="text-xs text-slate-500 hidden sm:block">Región del Maule • Chile</p>
+                                    </div>
+                                </div>
+                                <div className={`flex md:hidden items-center px-2 py-1 rounded-md border ${isLive ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                                    <span className="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1"><Wifi size={10} /> {isLive ? 'En Vivo' : 'Error'}</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 w-full md:w-auto">
+                                {periodoActual && (
+                                    <div className="hidden lg:flex items-center bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-100 text-xs font-semibold uppercase tracking-wider">
+                                        <Calendar size={14} className="mr-1.5" /> Entrega DIRPLAN: {periodoActual}
+                                    </div>
+                                )}
+                                <div className="flex-1 md:w-80 flex items-center bg-slate-100/80 rounded-xl px-3 py-2.5 md:px-4 md:py-2.5 border border-transparent focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-4 focus-within:ring-indigo-100/50 transition-all duration-300 group">
+                                    <Search size={18} className="text-slate-400 mr-2 md:mr-3 group-focus-within:text-indigo-500 transition-colors" />
+                                    <input type="text" placeholder="Buscar por nombre, comuna o servicio..." className="bg-transparent border-none outline-none text-sm w-full text-slate-700 placeholder-slate-400" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                                </div>
+                                <div className="hidden md:flex items-center gap-3 pl-4 border-l border-slate-200">
+                                    <div className={`flex flex-col items-end ${isLive ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"><Wifi size={10} /> {isLive ? 'Datos en Vivo' : 'Sin Conexión'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </header>
+
+                        {/* Scrollable Content */}
+                        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar scroll-smooth">
+                            
+                            {errorMsg && (
+                                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-3 animate-fade-in">
+                                    <AlertCircle size={20} />
+                                    <div>
+                                        <p className="font-bold text-sm">Aviso de conexión</p>
+                                        <p className="text-xs">{errorMsg}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {loading ? (
+                                <div className="space-y-6 animate-fade-in flex flex-col h-full justify-center">
+                                    <div className="text-center mb-4">
+                                        <div className="inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3"></div>
+                                        <p className="text-slate-500 text-sm font-medium">{loadProgress}</p>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 opacity-50">
+                                        <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Indicador de Filtro Cruzado de Tabla */}
+                                    {selectedProject && (
+                                        <div className="bg-indigo-100 text-indigo-800 px-4 py-3 rounded-xl mb-1 flex items-center justify-between animate-fade-in border border-indigo-200 shadow-sm">
+                                            <span className="text-sm font-medium flex items-center gap-2">
+                                                <Filter size={16} className="text-indigo-600" /> Aislando datos del contrato: <strong>{filtered.find(d => d.id === selectedProject)?.nombre}</strong>
+                                            </span>
+                                            <button onClick={() => setSelectedProject(null)} className="hover:bg-indigo-200 p-1.5 rounded-md transition-colors text-indigo-600 hover:text-indigo-900 flex items-center gap-1 text-xs font-bold uppercase tracking-wider">
+                                                <X size={14} /> Quitar Filtro
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Top KPIs */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                                        <KPICard title="Total Contratos" value={new Intl.NumberFormat('es-CL').format(activeData.length)} subtext={selectedProject ? "Contrato seleccionado" : (filtered.length === data.length ? "Cartera completa" : "Registros Filtrados")} icon={FileText} bgClass="bg-blue-50" colorClass="text-blue-600" delay={0} />
+                                        <KPICard title="Monto Vigente" value={formatMoney(kpiMontoVigente)} subtext="Contrato Vigente (millones de pesos)" icon={Database} bgClass="bg-indigo-50" colorClass="text-indigo-600" delay={100} />
+                                        <KPICard title="Programado Año" value={formatMoney(kpiPresupuesto)} subtext="Estimación filtrada (millones de pesos)" icon={Wallet} bgClass="bg-emerald-50" colorClass="text-emerald-600" delay={200} />
+                                        <KPICard title="Proyectos de Obra" value={new Intl.NumberFormat('es-CL').format(countObras)} subtext="Contratos de ejecución" icon={Building2} bgClass="bg-orange-50" colorClass="text-orange-600" delay={300} />
+                                    </div>
+
+                                    {/* Charts Section */}
+                                    <div className="grid grid-cols-1 gap-4">
+                                        {/* Chart 1: Presupuesto por Dirección/Servicio */}
+                                        <div className="bg-white p-5 rounded-2xl shadow-soft border border-slate-100 flex flex-col h-[350px] animate-fade-in" style={{ animationDelay: '500ms' }}>
+                                            <div className="mb-2 flex items-center justify-between">
+                                                <h3 className="font-bold text-slate-700 flex items-center gap-2"><span className="w-1.5 h-6 bg-purple-500 rounded-full"></span>Presupuesto por Servicio MOP</h3>
+                                            </div>
+                                            <div className="flex-1 mt-2">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <RePieChart>
+                                                        <Pie data={chartDataServicio} cx="50%" cy="50%" innerRadius={70} outerRadius={100} paddingAngle={5} dataKey="value" animationDuration={1000}>
+                                                            {chartDataServicio.map((entry, index) => (
+                                                                <Cell 
+                                                                    key={`cell-${index}`} 
+                                                                    fill={COLORS[(index + 3) % COLORS.length]} 
+                                                                    cursor="pointer"
+                                                                    onClick={() => setSelectedServicios(prev => prev.includes(entry.name) ? prev.filter(s => s !== entry.name) : [...prev, entry.name])}
+                                                                />
+                                                            ))}
+                                                        </Pie>
+                                                        <RechartsTooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)', padding: '12px 16px' }} formatter={(value) => [<span className="font-bold text-indigo-600 text-base">{formatMoney(value)}</span>, 'Presupuesto']} />
+                                                        <Legend verticalAlign="bottom" height={40} iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 500, color: '#64748b' }}/>
+                                                    </RePieChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Data Table */}
+                                    <div className="bg-white rounded-2xl shadow-soft border border-slate-100 flex flex-col overflow-hidden animate-fade-in" style={{ animationDelay: '600ms' }}>
+                                        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/30">
+                                            <div>
+                                                <h3 className="font-bold text-slate-700 text-lg">Detalle de Contratos</h3>
+                                                <p className="text-slate-400 text-xs mt-1">Haz clic sobre una fila para aislar sus datos en las tarjetas superiores</p>
+                                            </div>
+                                            <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-lg shadow-sm self-start sm:self-auto">{new Intl.NumberFormat('es-CL').format(filtered.length)} Resultados</span>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm text-left table-fixed min-w-[900px]">
+                                                <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200 text-[11px] uppercase tracking-wider">
+                                                    <tr>
+                                                        <th className="px-3 py-3 pl-6 w-[30%]">Nombre del Contrato</th>
+                                                        <th className="px-3 py-3 w-[16%]">Servicio MOP</th>
+                                                        <th className="px-3 py-3 w-[12%] text-center">F. Inicio</th>
+                                                        <th className="px-3 py-3 w-[12%] text-center">F. Término</th>
+                                                        <th className="px-3 py-3 w-[15%] text-center">Fecha Mes/Licit.</th>
+                                                        <th className="px-3 py-3 text-right pr-6 w-[15%]">Programado Año</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-50">
+                                                    {paginatedData.length > 0 ? paginatedData.map((d, idx) => (
+                                                        <tr 
+                                                            key={idx} 
+                                                            onClick={() => setSelectedProject(prev => prev === d.id ? null : d.id)}
+                                                            className={`transition-colors group cursor-pointer ${selectedProject === d.id ? 'bg-indigo-100/60 ring-1 ring-indigo-200 shadow-sm' : 'hover:bg-indigo-50/40'}`}
+                                                            title="Haz clic para aislar este contrato"
+                                                        >
+                                                            <td className="px-3 py-3 font-medium text-slate-700 pl-6 align-middle">
+                                                                <div className="line-clamp-2 w-full leading-tight" title={d.nombre}>{d.nombre}</div>
+                                                            </td>
+                                                            <td className="px-3 py-3 align-middle text-slate-600">
+                                                                <span className="text-xs font-medium block truncate" title={d.servicio}>{d.servicio}</span>
+                                                            </td>
+                                                            <td className="px-3 py-3 text-center align-middle">
+                                                                <span className="text-slate-600 text-xs font-medium">{d.fInicio}</span>
+                                                            </td>
+                                                            <td className="px-3 py-3 text-center align-middle">
+                                                                <span className="text-slate-600 text-xs font-medium">{d.fTermino}</span>
+                                                            </td>
+                                                            <td className="px-3 py-3 text-center align-middle">
+                                                                <span className="text-slate-500 text-xs font-medium bg-slate-50 px-2 py-1 rounded border border-slate-100 block mb-1">{d.fechaLicitacion}</span>
+                                                                <span className="text-[9px] text-indigo-400 uppercase font-semibold">{d.trimestreMovil}</span>
+                                                            </td>
+                                                            <td className="px-3 py-3 text-right pr-6 align-middle">
+                                                                <span className="font-mono text-indigo-700 font-bold bg-indigo-50/50 px-2 py-1 rounded border border-indigo-100 whitespace-nowrap text-xs">
+                                                                    {formatMoney(d.presupuesto)}
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                    )) : (
+                                                        <tr>
+                                                            <td colSpan="6" className="py-8 text-center text-slate-400 text-sm">No se encontraron contratos con los filtros actuales.</td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {/* Pagination Controls */}
+                                        {filtered.length > itemsPerPage && (
+                                            <div className="p-3 md:p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row gap-4 justify-between items-center">
+                                                <button onClick={handlePrevPage} disabled={currentPage === 1} className={`w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2 sm:py-1.5 rounded-xl text-sm font-medium transition-all border ${currentPage === 1 ? 'text-slate-300 border-transparent cursor-not-allowed' : 'text-slate-600 bg-white border-slate-200 hover:border-indigo-300 hover:text-indigo-600 hover:shadow-md'}`}><ChevronLeft size={16} /> Anterior</button>
+                                                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider order-first sm:order-none mb-1 sm:mb-0">Página <span className="text-slate-800 text-sm">{currentPage}</span> de {totalPages}</span>
+                                                <button onClick={handleNextPage} disabled={currentPage === totalPages} className={`w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2 sm:py-1.5 rounded-xl text-sm font-medium transition-all border ${currentPage === totalPages ? 'text-slate-300 border-transparent cursor-not-allowed' : 'text-slate-600 bg-white border-slate-200 hover:border-indigo-300 hover:text-indigo-600 hover:shadow-md'}`}>Siguiente <ChevronRight size={16} /></button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                            <div className="h-8"></div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('landing');
+            return (
+                <>
+                    {view === 'landing' ? (
+                        <LandingPage onEnter={() => setView('dashboard')} />
+                    ) : (
+                        <Dashboard onBack={() => setView('landing')} />
+                    )}
+                </>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

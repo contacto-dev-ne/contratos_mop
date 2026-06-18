@@ -19,6 +19,7 @@
             "react": "https://esm.sh/react@18.2.0",
             "react-dom": "https://esm.sh/react-dom@18.2.0",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
             "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
             "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0,react-dom@18.2.0"
         }
@@ -73,7 +74,7 @@
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        /* Loader inicial */
+        /* Loader inicial visible */
         #root:empty::before {
             content: 'Iniciando sistema MOP...';
             display: flex;
@@ -94,21 +95,19 @@
     <div id="root"></div>
 
     <script>
-        // Sistema de control de errores optimizado para evitar falsos positivos de extensiones o CORS
+        // Detector optimizado para que no se bloquee por extensiones del navegador
         window.addEventListener('error', function(e) {
-            console.error("Controlador de estabilidad MOP detectó:", e.message);
-            // Solo romper la pantalla si es un error fatal interno de nuestro script principal
-            if (e.error && e.error.stack && e.error.stack.includes('text/babel')) {
-                const root = document.getElementById('root');
-                if (root && root.innerHTML === '') {
-                    root.innerHTML = `<div style="display:flex; height:100vh; align-items:center; justify-content:center; text-align:center; padding:20px; color:#ef4444; font-family:sans-serif;">
-                        <div>
-                            <h3 style="font-weight:bold; font-size:1.2rem; margin-bottom:10px;">Error de Inicialización</h3>
-                            <p>No se pudo estructurar el visualizador. Revisa la consola para más detalles.</p>
-                            <p style="font-size:0.8rem; margin-top:10px; color:#64748b;">${e.message}</p>
-                        </div>
-                    </div>`;
-                }
+            console.warn("Estabilidad detectó un evento externo:", e.message);
+            const root = document.getElementById('root');
+            // Solo actuar si el error es realmente un colapso fatal de React interno
+            if (root && root.innerHTML === '' && e.error && String(e.error.stack).includes('text/babel')) {
+                root.innerHTML = `<div style="display:flex; height:100vh; align-items:center; justify-content:center; text-align:center; padding:20px; color:#ef4444; font-family:sans-serif;">
+                    <div>
+                        <h3 style="font-weight:bold; font-size:1.2rem; margin-bottom:10px;">Error de Inicialización</h3>
+                        <p>No se pudo estructurar el visualizador en el navegador. Revisa la consola.</p>
+                        <p style="font-size:0.8rem; margin-top:10px; color:#64748b;">${e.message}</p>
+                    </div>
+                </div>`;
             }
         });
     </script>

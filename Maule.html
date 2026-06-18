@@ -11,8 +11,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     
-    <!-- Babel para transpilar JSX en el navegador -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" crossorigin></script>
+    <script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js" crossorigin></script>
+    <script src="https://unpkg.com/lucide@0.263.1/dist/umd/lucide.min.js" crossorigin></script>
 
     <script>
         tailwind.config = {
@@ -44,19 +49,6 @@
         }
     </script>
 
-    <!-- IMPORT MAP: Configurado para usar Recharts sin errores -->
-    <script type="importmap">
-    {
-        "imports": {
-            "react": "https://esm.sh/react@18.2.0",
-            "react-dom": "https://esm.sh/react-dom@18.2.0",
-            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-            "recharts": "https://esm.sh/recharts@2.12.0?deps=react@18.2.0,react-dom@18.2.0",
-            "lucide-react": "https://esm.sh/lucide-react@0.263.1?deps=react@18.2.0,react-dom@18.2.0"
-        }
-    }
-    </script>
-
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
         
@@ -75,7 +67,6 @@
         }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-        /* Loader inicial visible */
         #root:empty::before {
             content: 'Iniciando sistema MOP...';
             display: flex;
@@ -104,20 +95,21 @@
                     <div>
                         <h3 style="font-weight:bold; font-size:1.2rem; margin-bottom:10px;">Error de Inicialización</h3>
                         <p>No se pudo cargar la aplicación. Detalles en consola.</p>
-                        <p style="font-size:0.8rem; margin-top:10px; color:#64748b;">${e.message}</p>
+                        <p style="font-size:0.8rem; margin-top:10px; color:#64748b;">${e.message || "Script Error de Origen Cruzado"}</p>
                     </div>
                 </div>`;
             }
         });
     </script>
 
-    <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useMemo, useRef } from 'react';
-        import { createRoot } from 'react-dom/client';
-        import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart as RePieChart, Pie, Legend } from 'recharts';
-        import { 
-            LayoutDashboard, Database, Filter, Calendar, ChevronDown, Check, Search, Building2, Wallet, TrendingUp, Menu, X, ChevronRight, ChevronLeft, Wifi, ExternalLink, MoreHorizontal, ArrowUpRight, Layers, ArrowRight, ArrowLeft, MapPin, Briefcase, FileText, AlertCircle
-        } from 'lucide-react';
+    <script type="text/babel">
+        // Extraemos lo que necesitamos directamente de los objetos globales cargados en las etiquetas <script>
+        const { useState, useEffect, useMemo, useRef } = React;
+        const { createRoot } = ReactDOM;
+        const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip: RechartsTooltip, ResponsiveContainer, Cell, PieChart: RePieChart, Pie, Legend } = Recharts;
+        const { 
+            LayoutDashboard, Database, Filter, Calendar, ChevronDown, Check, Search, Building2, Wallet, TrendingUp, Menu, X, ChevronRight, ChevronLeft, Wifi, ExternalLink, MoreHorizontal, ArrowUpRight, Layers, ArrowRight, ArrowLeft, MapPin, Briefcase, FileText, AlertCircle 
+        } = lucide;
 
         // ==========================================
         // CONFIGURACIÓN API
@@ -126,42 +118,32 @@
         
         const COLORS = ['#4f46e5', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#14b8a6'];
         
-        // Formateador de moneda: Ahora muestra en Millones de Pesos (MM$)
         const formatMoney = (v) => {
             if (!v) return 'MM$ 0';
-            // Como los datos base están en miles de pesos, dividimos por 1000 para llegar a millones
             const millones = v / 1000; 
             return `MM$ ${new Intl.NumberFormat('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(millones)}`;
         };
 
-        // Parseador robusto para convertir formatos de Excel (texto, puntos, comas) a números matemáticos
         const parseMoney = (val) => {
             if (val === null || val === undefined || val === '') return 0;
             if (typeof val === 'number') return val;
             let str = String(val).trim();
-            str = str.replace(/[\$\s]/g, ''); // Quitar signos $ y espacios
+            str = str.replace(/[\$\s]/g, ''); 
             
             const dotCount = (str.match(/\./g) || []).length;
             const commaCount = (str.match(/,/g) || []).length;
             
             if (commaCount === 1 && dotCount > 0) {
-                // Formato chileno: 1.000.000,50
                 str = str.replace(/\./g, '').replace(',', '.');
             } else if (dotCount === 1 && commaCount > 0) {
-                // Formato US: 1,000,000.50
                 str = str.replace(/,/g, '');
             } else if (dotCount > 1) {
-                // Ejemplo: 1.000.000 -> son separadores de miles
                 str = str.replace(/\./g, '');
             } else if (commaCount > 1) {
-                // Ejemplo: 1,000,000 -> son separadores de miles
                 str = str.replace(/,/g, '');
             } else if (commaCount === 1 && dotCount === 0) {
-                // Ejemplo: 1000,50 -> la coma es decimal en Chile
                 str = str.replace(',', '.');
             }
-            // Si dotCount === 1 && commaCount === 0 (Ej: "67258.013")
-            // Se trata como un float normal ya que Power Automate envía los decimales con punto.
             
             return parseFloat(str) || 0;
         };
@@ -203,7 +185,7 @@
 
         const KPICard = ({ title, value, subtext, icon: Icon, colorClass, bgClass, delay = 0 }) => (
             <div className="bg-white rounded-2xl p-4 shadow-soft border border-slate-100 hover:border-indigo-100 hover:shadow-lg hover:shadow-indigo-500/5 transition-all duration-300 group relative overflow-hidden animate-fade-in" style={{ animationDelay: `${delay}ms` }}>
-                <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-500 ${bgClass.replace('bg-', 'bg-')}`}></div>
+                <div className={`absolute -right-6 -top-6 w-24 h-24 rounded-full opacity-10 group-hover:opacity-20 transition-opacity duration-500 ${bgClass}`}></div>
                 <div className="flex justify-between items-start relative z-10">
                     <div>
                         <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-2">{title}</p>
@@ -238,24 +220,42 @@
             
             return (
                 <div className="relative group" ref={containerRef}>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">{label}</label>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 ml-1">
+                        {label}
+                    </label>
                     <button onClick={() => setIsOpen(!isOpen)} className={`w-full bg-slate-800/50 border ${isOpen ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-700 group-hover:border-slate-600'} rounded-xl py-3 px-4 text-sm flex justify-between items-center transition-all text-slate-200 backdrop-blur-sm`}>
-                        <div className="flex items-center gap-2.5 overflow-hidden">{Icon && <Icon size={16} className={`${isOpen ? 'text-indigo-400' : 'text-slate-400'} flex-shrink-0 transition-colors`} />}<span className="truncate font-medium">{getSummary()}</span></div>
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                            {Icon && <Icon size={16} className={`${isOpen ? 'text-indigo-400' : 'text-slate-400'} flex-shrink-0 transition-colors`} />}
+                            <span className="truncate font-medium">{getSummary()}</span>
+                        </div>
                         <ChevronDown size={16} className={`text-slate-500 transition-transform duration-300 ${isOpen ? 'rotate-180 text-indigo-400' : ''}`} />
                     </button>
                     {isOpen && (
                         <div className="absolute z-50 mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-xl shadow-slate-900/10 max-h-64 overflow-y-auto custom-scrollbar animate-fade-in">
                             <div className="sticky top-0 bg-slate-50/95 backdrop-blur-md border-b border-slate-100 p-2 cursor-pointer hover:bg-slate-100 transition-colors z-10" onClick={() => isAllSelected ? onChange([]) : onChange([...options])}>
-                                <div className="flex items-center gap-3 px-2 py-1"><div className={`w-4 h-4 rounded border flex items-center justify-center transition-all duration-200 ${isAllSelected ? 'bg-indigo-600 border-indigo-600 shadow-sm' : 'bg-white border-slate-300'}`}>{isAllSelected && <Check size={12} className="text-white" strokeWidth={3} />}</div><span className="text-sm font-bold text-indigo-900">Seleccionar Todo</span></div>
+                                <div className="flex items-center gap-3 px-2 py-1">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all duration-200 ${isAllSelected ? 'bg-indigo-600 border-indigo-600 shadow-sm' : 'bg-white border-slate-300'}`}>
+                                        {isAllSelected && <Check size={12} className="text-white" strokeWidth={3} />}
+                                    </div>
+                                    <span className="text-sm font-bold text-indigo-900">Seleccionar Todo</span>
+                                </div>
                             </div>
-                            <div className="p-1.5">{options.map(opt => (<div key={opt} className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => toggleOption(opt)}><div className={`w-4 h-4 rounded border flex items-center justify-center transition-all duration-200 ${selected.includes(opt) ? 'bg-indigo-500 border-indigo-500 shadow-sm' : 'bg-white border-slate-300'}`}>{selected.includes(opt) && <Check size={10} className="text-white" strokeWidth={3} />}</div><span className={`text-sm ${selected.includes(opt) ? 'text-indigo-900 font-medium' : 'text-slate-600'}`}>{opt}</span></div>))}</div>
+                            <div className="p-1.5">
+                                {options.map(opt => (
+                                    <div key={opt} className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors" onClick={() => toggleOption(opt)}>
+                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all duration-200 ${selected.includes(opt) ? 'bg-indigo-500 border-indigo-500 shadow-sm' : 'bg-white border-slate-300'}`}>
+                                            {selected.includes(opt) && <Check size={10} className="text-white" strokeWidth={3} />}
+                                        </div>
+                                        <span className={`text-sm ${selected.includes(opt) ? 'text-indigo-900 font-medium' : 'text-slate-600'}`}>{opt}</span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>
             );
         };
 
-        // --- COMPONENTE: PORTADA ---
         const LandingPage = ({ onEnter }) => {
             return (
                 <div className="h-screen w-full bg-brand relative overflow-hidden flex flex-col items-center justify-center text-white font-sans">
@@ -298,9 +298,6 @@
             );
         };
 
-        // ==========================================
-        // COMPONENTE: DASHBOARD
-        // ==========================================
         const Dashboard = ({ onBack }) => {
             const [data, setData] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -309,7 +306,6 @@
             const [sidebarOpen, setSidebarOpen] = useState(false);
             const [loadProgress, setLoadProgress] = useState('');
             
-            // Filtros
             const [selectedTipos, setSelectedTipos] = useState([]);
             const [selectedEstados, setSelectedEstados] = useState([]);
             const [selectedServicios, setSelectedServicios] = useState([]);
@@ -318,16 +314,10 @@
             const [searchTerm, setSearchTerm] = useState('');
             const [periodoActual, setPeriodoActual] = useState('');
             
-            // Estado para el filtro cruzado de la tabla
             const [selectedProject, setSelectedProject] = useState(null);
-
-            // Paginación UI
             const [currentPage, setCurrentPage] = useState(1);
             const itemsPerPage = 8; 
 
-            // =======================================================
-            // LÓGICA DE EXTRACCIÓN Y PAGINACIÓN DE LA API (POWER AUTOMATE)
-            // =======================================================
             useEffect(() => {
                 const fetchAllData = async () => {
                     setLoading(true);
@@ -338,8 +328,6 @@
                     let offset = 0;
                     let hasMoreData = true;
 
-                    // Función auxiliar para buscar el valor real del diccionario 
-                    // (Considerando sufijos _x002e_1 por problemas de Excel)
                     const getVal = (obj, keys) => {
                         for(let k of keys) {
                             if(obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
@@ -347,24 +335,17 @@
                         return null;
                     };
 
-                    // Función de parseo de fechas movida aquí arriba para usarla en la limpieza fila a fila
                     const parseDateToTimestamp = (str) => {
                         if (!str || str === "Sin Fecha" || str === "Por Definir") return 0;
-                        
-                        // 1. Formato Número de Serie de Excel
                         if (!isNaN(str) && Number(str) > 20000) return Math.round((Number(str) - 25569) * 86400000);
                         
                         let cleanStr = String(str).toLowerCase().trim();
-                        
-                        // 2. Formato DD-MM-YYYY o DD/MM/YYYY
                         const dateMatch = cleanStr.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
                         if (dateMatch) return Date.UTC(parseInt(dateMatch[3]), parseInt(dateMatch[2]) - 1, parseInt(dateMatch[1]));
 
-                        // 3. Formato YYYY-MM-DD o YYYY/MM/DD
                         const dateMatchRev = cleanStr.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
                         if (dateMatchRev) return Date.UTC(parseInt(dateMatchRev[1]), parseInt(dateMatchRev[2]) - 1, parseInt(dateMatchRev[3]));
 
-                        // 4. Formato Texto (ej: "enero 2026")
                         const months = {'ene': 0, 'feb': 1, 'mar': 2, 'abr': 3, 'may': 4, 'jun': 5, 'jul': 6, 'ago': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dic': 11};
                         let monthFound = -1;
                         let yearFound = new Date().getFullYear();
@@ -377,7 +358,6 @@
                         
                         if (monthFound !== -1) return Date.UTC(yearFound, monthFound, 1);
                         
-                        // 5. Fallback estándar de Javascript
                         const d = new Date(str);
                         if (!isNaN(d.getTime())) return d.getTime();
                         return 0;
@@ -394,11 +374,8 @@
 
                             if (!response.ok) throw new Error(`Error HTTP: ${response.status}`);
                             
-                            // Se lee la respuesta como texto primero para manejar respuestas vacías o no-JSON
                             const textData = await response.text();
-                            
                             if (!textData || textData.trim() === '') {
-                                // Power Automate puede devolver una cadena vacía cuando ya no hay más datos
                                 hasMoreData = false;
                                 break;
                             }
@@ -407,12 +384,10 @@
                             try {
                                 json = JSON.parse(textData);
                             } catch (parseError) {
-                                console.warn("JSON inválido recibido, asumiendo fin de datos.", parseError);
                                 hasMoreData = false;
                                 break;
                             }
 
-                            // Extraer items considerando diferentes estructuras posibles que devuelve Power Automate
                             let items = [];
                             if (Array.isArray(json)) {
                                 items = json;
@@ -426,15 +401,11 @@
                             }
                             
                             if (items.length === 0) {
-                                hasMoreData = false; // Fin de la paginación
+                                hasMoreData = false;
                             } else {
-                                // Procesar el bloque de datos actual
                                 const processedBlock = items.map((d, index) => {
-                                    
-                                    // 1. Nombre
                                     const nombre = getVal(d, ["Nombre Contrato", "Nombre Contrato_x002e_1", "Nombre IDI"]) || `Sin Nombre (ID: ${d.ItemInternalId || index})`;
                                     
-                                    // 2. Clasificación/Tipo
                                     const tipoRaw = getVal(d, ["Item", "Clasificacion", "Etapa", "Tipo Contratación"]);
                                     let tipo = "Otro";
                                     if(tipoRaw) {
@@ -445,22 +416,15 @@
                                         else tipo = String(tipoRaw);
                                     }
 
-                                    // 3. Ubicación
                                     const provincia = getVal(d, ["Provincia", "Provincia Contrato"]) || "Regional";
                                     const comuna = getVal(d, ["Comuna", "Comuna Contrato"]) || "Varias";
-                                    
-                                    // 4. Servicio / Dirección
                                     const servicio = getVal(d, ["Servicio", "Servicio_x002e_1"]) || "MOP Nivel Central";
-                                    
-                                    // 5. Estado (Se mantiene para filtros aunque no se muestre en tabla)
                                     const estado = getVal(d, ["Estado", "Estado_x002e_1"]) || "No Definido";
                                     
-                                    // Extraer Trimestre y Mes Entrega DIRPLAN primero para la regla de negocio
                                     const trimestreMovil = getVal(d, ["trimestre movil", "trimestre movil_x002e_1", "mes", "mes_x002e_1"]) || "Sin Trimestre";
                                     const mesEntrega = getVal(d, ["mes entrega DIRPLAN", "mes entrega DIRPLAN_x002e_1"]) || "Sin Fecha";
                                     const mesEntregaTs = parseDateToTimestamp(mesEntrega);
 
-                                    // 6. Fechas (Convertir y aplicar REGLA DE NEGOCIO DIRPLAN)
                                     let fechaRaw = getVal(d, ["Mes Licitación", "Mes Licitación_x002e_1", "F Licitación", "F Licitación_x002e_1"]);
                                     let fechaLicitacion = "Por Definir";
                                     let fechaLicitacionTs = 0;
@@ -475,12 +439,10 @@
                                         }
                                     }
 
-                                    // REGLA: Si la fecha de Licitación es estrictamente menor a la fecha DIRPLAN, se oculta.
                                     if (fechaLicitacionTs > 0 && mesEntregaTs > 0 && fechaLicitacionTs < mesEntregaTs) {
                                         fechaLicitacion = "Por Definir";
                                     }
 
-                                    // 6.1 Fechas de Inicio y Término
                                     let fInicioRaw = getVal(d, ["F Inicio", "F Inicio_x002e_1"]);
                                     let fInicio = "-";
                                     if(fInicioRaw) {
@@ -497,7 +459,6 @@
                                         else fTermino = String(fTerminoRaw);
                                     }
 
-                                    // 7. Finanzas (Prioridad estricta: Programado año -> Programado + pagado año -> 0)
                                     let presupuesto = 0;
                                     const pAno = getVal(d, ["Programado año", "Programado año_x002e_1"]);
                                     const pPagado = getVal(d, ["Programado + pagado año", "Programado + pagado año_x002e_1"]);
@@ -508,14 +469,12 @@
                                         presupuesto = parseMoney(pPagado);
                                     }
 
-                                    // 7.1 Monto Vigente Contrato
                                     let montoVigente = 0;
                                     const mVigente = getVal(d, ["Monto Vigente Contrato", "Monto Vigente Contrato_x002e_1"]);
                                     if (mVigente !== null && mVigente !== undefined && String(mVigente).trim() !== "") {
                                         montoVigente = parseMoney(mVigente);
                                     }
 
-                                    // 9. Centro Gestión
                                     const centroGestion = getVal(d, ["Centro Gestión", "Centro gestión_x002e_1", "Centro gestión.1"]) || "Sin Centro";
 
                                     return { 
@@ -527,7 +486,6 @@
                                 allRecords = allRecords.concat(processedBlock);
                                 offset += 5000;
                                 
-                                // Si trajo menos de 5000, es la última página
                                 if (items.length < 5000) hasMoreData = false;
                             }
                         }
@@ -544,12 +502,10 @@
                                 }
                             });
 
-                            // Filtrar globalmente por el último periodo
                             const finalRecords = latestMesEntrega && latestMesEntrega !== "Sin Fecha" 
                                 ? allRecords.filter(r => r.mesEntrega === latestMesEntrega) 
                                 : allRecords;
 
-                            // Formatear periodo para mostrar en la interfaz limpiamente (Ej: "enero de 2026")
                             let periodoDisplay = latestMesEntrega || "Actualizado";
                             if (latestMesEntrega && latestMesEntrega !== "Sin Fecha") {
                                 const ts = parseDateToTimestamp(latestMesEntrega);
@@ -579,13 +535,11 @@
                 fetchAllData();
             }, []);
 
-            // Resetear página y selección de tabla al aplicar filtros laterales
             useEffect(() => { 
                 setCurrentPage(1); 
                 setSelectedProject(null);
             }, [selectedTipos, selectedEstados, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
 
-            // Función de filtrado multidimensional
             const getFilteredData = (ignoreFilter) => {
                 return data.filter(d => {
                     if (ignoreFilter !== 'tipo' && selectedTipos.length > 0 && !selectedTipos.includes(d.tipo)) return false;
@@ -602,48 +556,39 @@
                 });
             };
 
-            // Opciones dinámicas para los filtros (se actualizan según lo que está filtrado)
             const tipos = useMemo(() => { const sub = getFilteredData('tipo'); return [...new Set(sub.map(d => d.tipo))].sort(); }, [data, selectedEstados, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
             const estados = useMemo(() => { const sub = getFilteredData('estado'); return [...new Set(sub.map(d => d.estado))].sort(); }, [data, selectedTipos, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
             const servicios = useMemo(() => { const sub = getFilteredData('servicio'); return [...new Set(sub.map(d => d.servicio))].sort(); }, [data, selectedTipos, selectedEstados, selectedTrimestres, selectedCentros, searchTerm]);
             const trimestres = useMemo(() => { const sub = getFilteredData('trimestre'); return [...new Set(sub.map(d => d.trimestreMovil))].sort(); }, [data, selectedTipos, selectedEstados, selectedServicios, selectedCentros, searchTerm]);
             const centros = useMemo(() => { const sub = getFilteredData('centro'); return [...new Set(sub.map(d => d.centroGestion))].sort(); }, [data, selectedTipos, selectedEstados, selectedServicios, selectedTrimestres, searchTerm]);
             
-            // Datos filtrados finales para la tabla y gráficos
             const filtered = useMemo(() => getFilteredData('none'), [data, selectedTipos, selectedEstados, selectedServicios, selectedTrimestres, selectedCentros, searchTerm]);
 
-            // Datos activos para KPIs y Gráficos (Cross-Filter de la tabla)
             const activeData = useMemo(() => {
                 if (selectedProject) return filtered.filter(d => d.id === selectedProject);
                 return filtered;
             }, [filtered, selectedProject]);
 
-            // Paginación calculada (Usa filtered para que la tabla no se reduzca a 1 fila)
             const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
             const paginatedData = filtered.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-            // KPIs (Ahora se alimentan de activeData para el Cross-Filtering)
             const kpiPresupuesto = activeData.reduce((acc, curr) => acc + curr.presupuesto, 0);
             const kpiMontoVigente = activeData.reduce((acc, curr) => acc + curr.montoVigente, 0);
             const countObras = activeData.filter(d => d.tipo === 'Obra' || d.tipo.toLowerCase().includes('obra')).length;
 
-            // Datos para Gráficos (También se alimenta de activeData)
             const chartDataServicio = useMemo(() => { 
                 const m = {};
                 activeData.forEach(d => m[d.servicio] = (m[d.servicio] || 0) + d.presupuesto); 
                 return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5); 
             }, [activeData]);
 
-            // Handlers UI
             const handlePrevPage = () => setCurrentPage(prev => Math.max(prev - 1, 1));
             const handleNextPage = () => setCurrentPage(prev => Math.min(prev + 1, totalPages));
 
             return (
                 <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-                    {/* Overlay Mobile */}
                     {sidebarOpen && (<div className="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm md:hidden transition-opacity animate-fade-in" onClick={() => setSidebarOpen(false)} />)}
                     
-                    {/* Sidebar */}
                     <aside className={`fixed md:static inset-y-0 left-0 z-50 w-72 bg-brand text-white flex flex-col shadow-2xl transition-transform duration-300 ease-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
                         <div className="p-6 flex items-center justify-between border-b border-slate-800/50 bg-slate-900/30">
                             <div className="flex items-center gap-3">
@@ -684,9 +629,7 @@
                         </nav>
                     </aside>
 
-                    {/* Main Content */}
                     <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-50/50">
-                        {/* Header */}
                         <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 flex flex-col md:flex-row items-start md:items-center justify-between px-4 md:px-6 py-3 md:py-4 z-20 sticky top-0 gap-3 md:gap-0">
                             <div className="w-full md:w-auto flex items-center justify-between">
                                 <div className="flex items-center gap-3">
@@ -718,7 +661,6 @@
                             </div>
                         </header>
 
-                        {/* Scrollable Content */}
                         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar scroll-smooth">
                             
                             {errorMsg && (
@@ -743,7 +685,6 @@
                                 </div>
                             ) : (
                                 <>
-                                    {/* Indicador de Filtro Cruzado de Tabla */}
                                     {selectedProject && (
                                         <div className="bg-indigo-100 text-indigo-800 px-4 py-3 rounded-xl mb-1 flex items-center justify-between animate-fade-in border border-indigo-200 shadow-sm">
                                             <span className="text-sm font-medium flex items-center gap-2">
@@ -755,7 +696,6 @@
                                         </div>
                                     )}
 
-                                    {/* Top KPIs */}
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                                         <KPICard title="Total Contratos" value={new Intl.NumberFormat('es-CL').format(activeData.length)} subtext={selectedProject ? "Contrato seleccionado" : (filtered.length === data.length ? "Cartera completa" : "Registros Filtrados")} icon={FileText} bgClass="bg-blue-50" colorClass="text-blue-600" delay={0} />
                                         <KPICard title="Monto Vigente" value={formatMoney(kpiMontoVigente)} subtext="Contrato Vigente (millones de pesos)" icon={Database} bgClass="bg-indigo-50" colorClass="text-indigo-600" delay={100} />
@@ -763,9 +703,7 @@
                                         <KPICard title="Proyectos de Obra" value={new Intl.NumberFormat('es-CL').format(countObras)} subtext="Contratos de ejecución" icon={Building2} bgClass="bg-orange-50" colorClass="text-orange-600" delay={300} />
                                     </div>
 
-                                    {/* Charts Section */}
                                     <div className="grid grid-cols-1 gap-4">
-                                        {/* Chart 1: Presupuesto por Dirección/Servicio */}
                                         <div className="bg-white p-5 rounded-2xl shadow-soft border border-slate-100 flex flex-col h-[350px] animate-fade-in" style={{ animationDelay: '500ms' }}>
                                             <div className="mb-2 flex items-center justify-between">
                                                 <h3 className="font-bold text-slate-700 flex items-center gap-2"><span className="w-1.5 h-6 bg-purple-500 rounded-full"></span>Presupuesto por Servicio MOP</h3>
@@ -791,7 +729,6 @@
                                         </div>
                                     </div>
 
-                                    {/* Data Table */}
                                     <div className="bg-white rounded-2xl shadow-soft border border-slate-100 flex flex-col overflow-hidden animate-fade-in" style={{ animationDelay: '600ms' }}>
                                         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/30">
                                             <div>
@@ -850,7 +787,6 @@
                                                 </tbody>
                                             </table>
                                         </div>
-                                        {/* Pagination Controls */}
                                         {filtered.length > itemsPerPage && (
                                             <div className="p-3 md:p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row gap-4 justify-between items-center">
                                                 <button onClick={handlePrevPage} disabled={currentPage === 1} className={`w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2 sm:py-1.5 rounded-xl text-sm font-medium transition-all border ${currentPage === 1 ? 'text-slate-300 border-transparent cursor-not-allowed' : 'text-slate-600 bg-white border-slate-200 hover:border-indigo-300 hover:text-indigo-600 hover:shadow-md'}`}><ChevronLeft size={16} /> Anterior</button>
